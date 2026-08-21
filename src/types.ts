@@ -189,7 +189,7 @@ export interface CrawlerOptions {
   queue?: QueueAdapter;
   /** Logger callback for all crawl events. */
   logger?: Logger;
-  /** Maximum number of concurrent page workers. Default: 4. */
+  /** Maximum number of concurrent page workers. Default: 1. */
   globalConcurrency?: number;
   /** Minimum delay between requests to the same hostname (ms). Default: 500. */
   perHostDelayMs?: number;

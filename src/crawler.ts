@@ -20,7 +20,7 @@ import { HostThrottle } from "./HostThrottle";
 // ---------------------------------------------------------------------------
 
 const DEFAULTS = {
-  globalConcurrency: 4,
+  globalConcurrency: 1,
   perHostDelayMs: 500,
   requestTimeoutMs: 10_000,
   retryAttempts: 2,
@@ -28,7 +28,7 @@ const DEFAULTS = {
   maxPagesPerRun: 1_000,
   recheckWindowMs: 30 * 24 * 60 * 60 * 1_000, // 30 days
   inProgressStaleMs: 5 * 60 * 1_000, // 5 minutes
-  userAgent: "Mozilla/5.0 (compatible; crawler-core/1.0; +https://your-org.example)",
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   skipPersistOnUnchanged: false,
 } as const;
 
