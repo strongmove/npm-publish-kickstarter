@@ -5,6 +5,7 @@ import type {
   PersistenceAdapter,
   QueueAdapter,
   QueueItem,
+  SitePlugin,
 } from "./types";
 import { NoopPersistenceAdapter } from "./adapters/NoopPersistenceAdapter";
 import { InMemoryQueue } from "./adapters/InMemoryQueue";
@@ -32,6 +33,44 @@ const DEFAULTS = {
   skipPersistOnUnchanged: false,
 } as const;
 
+function applyPluginCrawlPolicy(
+  plugin: SitePlugin | undefined,
+  opts: {
+    maxDepth?: number;
+    requestTimeoutMs?: number;
+    retryAttempts?: number;
+    recheckWindowMs?: number;
+    inProgressStaleMs?: number;
+    skipPersistOnUnchanged?: boolean;
+    userAgent?: string;
+    stripQueryParams?: string[];
+    extraHeaders?: Record<string, string>;
+  }
+) {
+  const policy = plugin?.crawlPolicy ?? {};
+
+  return {
+    ...opts,
+    maxDepth: opts.maxDepth ?? policy.maxDepth ?? DEFAULTS.maxDepth,
+    requestTimeoutMs:
+      opts.requestTimeoutMs ?? policy.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs,
+    retryAttempts:
+      opts.retryAttempts ?? policy.retryAttempts ?? DEFAULTS.retryAttempts,
+    recheckWindowMs:
+      opts.recheckWindowMs ?? policy.recheckWindowMs ?? DEFAULTS.recheckWindowMs,
+    inProgressStaleMs:
+      opts.inProgressStaleMs ??
+      policy.inProgressStaleMs ??
+      DEFAULTS.inProgressStaleMs,
+    skipPersistOnUnchanged:
+      opts.skipPersistOnUnchanged ??
+      policy.skipPersistOnUnchanged ??
+      DEFAULTS.skipPersistOnUnchanged,
+    userAgent: opts.userAgent ?? DEFAULTS.userAgent,
+    stripQueryParams: opts.stripQueryParams ?? [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Shared crawl state
 // ---------------------------------------------------------------------------
@@ -51,7 +90,7 @@ interface CrawlState {
 async function processPage(
   item: QueueItem,
   state: CrawlState,
-  opts: Required<
+  opts: Partial<
     Pick<
       CrawlerOptions,
       | "maxDepth"
@@ -72,7 +111,7 @@ async function processPage(
   const { url, depth, id: itemId } = item;
 
   // Depth guard.
-  if (depth > opts.maxDepth) {
+  if (depth > (opts.maxDepth ?? DEFAULTS.maxDepth)) {
     await queue.ack(itemId);
     return;
   }
@@ -85,10 +124,13 @@ async function processPage(
   state.visited.add(url);
   state.pagesVisited++;
 
+  const plugin = findPlugin(url);
+  const effectivePageOpts = applyPluginCrawlPolicy(plugin, opts);
+
   // Cross-run claim.
   const claimed = await persistence.tryClaim(url, {
-    recheckWindowMs: opts.recheckWindowMs,
-    inProgressStaleMs: opts.inProgressStaleMs,
+    recheckWindowMs: effectivePageOpts.recheckWindowMs,
+    inProgressStaleMs: effectivePageOpts.inProgressStaleMs,
   });
 
   if (!claimed) {
@@ -108,12 +150,25 @@ async function processPage(
   }
   await throttle.wait(hostname);
 
-  // Find plugin.
-  const plugin = findPlugin(url);
   if (!plugin) {
     emitter.warn("parse.error", `No plugin found for URL — skipping`, { url });
     await persistence.markFailed(url, "No plugin registered for this URL");
     state.pagesFailed++;
+    await queue.ack(itemId);
+    return;
+  }
+
+  if (depth > effectivePageOpts.maxDepth) {
+    await queue.ack(itemId);
+    return;
+  }
+
+  if (plugin.crawlPolicy?.skipFetch) {
+    emitter.info("fetch.skipped", `Plugin crawl policy skipped fetch`, {
+      url,
+      reason: "skipFetch",
+    });
+    await persistence.markDone(url, {});
     await queue.ack(itemId);
     return;
   }
@@ -127,10 +182,10 @@ async function processPage(
   try {
     fetchResult = await fetchPage(url, {
       headers: pluginHeaders,
-      timeoutMs: opts.requestTimeoutMs,
-      retryAttempts: opts.retryAttempts,
-      userAgent: opts.userAgent,
-      extraHeaders: opts.extraHeaders,
+      timeoutMs: effectivePageOpts.requestTimeoutMs,
+      retryAttempts: effectivePageOpts.retryAttempts,
+      userAgent: effectivePageOpts.userAgent,
+      extraHeaders: effectivePageOpts.extraHeaders,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -176,7 +231,7 @@ async function processPage(
   let lastCanonicalId: string | undefined;
 
   const shouldSkipPersist =
-    opts.skipPersistOnUnchanged &&
+    effectivePageOpts.skipPersistOnUnchanged &&
     parseResult.meta?.contentHash === fetchResult.contentHash;
 
   if (!shouldSkipPersist) {
@@ -229,20 +284,26 @@ async function processPage(
   // Enqueue discovered links.
   const resolveBase = parseResult.baseUrl ?? baseUrl;
 
-  for (const link of parseResult.links) {
-    const resolved = resolveHref(resolveBase, link, {
-      stripQueryParams: opts.stripQueryParams,
+  if (plugin.crawlPolicy?.followLinks === false) {
+    emitter.info("link.skip", `Plugin crawl policy disabled link following`, {
+      url,
     });
+  } else {
+    for (const link of parseResult.links) {
+      const resolved = resolveHref(resolveBase, link, {
+        stripQueryParams: effectivePageOpts.stripQueryParams,
+      });
 
-    if (!resolved) continue;
-    if (state.visited.has(resolved)) continue;
+      if (!resolved) continue;
+      if (state.visited.has(resolved)) continue;
 
-    await queue.enqueue(resolved, { depth: depth + 1 });
-    emitter.debug("link.enqueue", `Enqueued link`, {
-      from: url,
-      to: resolved,
-      depth: depth + 1,
-    });
+      await queue.enqueue(resolved, { depth: depth + 1 });
+      emitter.debug("link.enqueue", `Enqueued link`, {
+        from: url,
+        to: resolved,
+        depth: depth + 1,
+      });
+    }
   }
 
   // Mark done.
@@ -270,40 +331,40 @@ async function processPage(
  * @returns A CrawlSummary with aggregate statistics.
  */
 export async function runCrawl(
-  seedUrls: string[],
-  opts: CrawlerOptions = {}
+ seedUrls: string[],
+ opts: CrawlerOptions = {}
 ): Promise<CrawlSummary> {
-  const startTime = Date.now();
+ const startTime = Date.now();
 
-  const persistence: PersistenceAdapter =
-    opts.persistence ?? new NoopPersistenceAdapter();
-  const queue: QueueAdapter = opts.queue ?? new InMemoryQueue();
-  const emitter = new EventEmitter(opts.logger);
+ const persistence: PersistenceAdapter =
+   opts.persistence ?? new NoopPersistenceAdapter();
+ const queue: QueueAdapter = opts.queue ?? new InMemoryQueue();
+ const emitter = new EventEmitter(opts.logger);
 
-  const concurrency = opts.globalConcurrency ?? DEFAULTS.globalConcurrency;
-  const perHostDelayMs = opts.perHostDelayMs ?? DEFAULTS.perHostDelayMs;
-  const maxPagesPerRun = opts.maxPagesPerRun ?? DEFAULTS.maxPagesPerRun;
-  const maxDepth = opts.maxDepth ?? DEFAULTS.maxDepth;
-  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs;
-  const retryAttempts = opts.retryAttempts ?? DEFAULTS.retryAttempts;
-  const recheckWindowMs = opts.recheckWindowMs ?? DEFAULTS.recheckWindowMs;
-  const inProgressStaleMs = opts.inProgressStaleMs ?? DEFAULTS.inProgressStaleMs;
-  const userAgent = opts.userAgent ?? DEFAULTS.userAgent;
-  const skipPersistOnUnchanged =
-    opts.skipPersistOnUnchanged ?? DEFAULTS.skipPersistOnUnchanged;
-  const stripQueryParams = opts.stripQueryParams ?? [];
+ const concurrency = opts.globalConcurrency ?? DEFAULTS.globalConcurrency;
+ const perHostDelayMs = opts.perHostDelayMs ?? DEFAULTS.perHostDelayMs;
+ const maxPagesPerRun = opts.maxPagesPerRun ?? DEFAULTS.maxPagesPerRun;
+ const maxDepth = opts.maxDepth ?? DEFAULTS.maxDepth;
+ const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs;
+ const retryAttempts = opts.retryAttempts ?? DEFAULTS.retryAttempts;
+ const recheckWindowMs = opts.recheckWindowMs ?? DEFAULTS.recheckWindowMs;
+ const inProgressStaleMs = opts.inProgressStaleMs ?? DEFAULTS.inProgressStaleMs;
+ const userAgent = opts.userAgent ?? DEFAULTS.userAgent;
+ const skipPersistOnUnchanged =
+   opts.skipPersistOnUnchanged ?? DEFAULTS.skipPersistOnUnchanged;
+ const stripQueryParams = opts.stripQueryParams ?? [];
 
-  const pageOpts = {
-    maxDepth,
-    requestTimeoutMs,
-    retryAttempts,
-    recheckWindowMs,
-    inProgressStaleMs,
-    skipPersistOnUnchanged,
-    userAgent,
-    stripQueryParams,
-    extraHeaders: opts.extraHeaders,
-  };
+ const pageOpts = {
+   maxDepth: opts.maxDepth,
+   requestTimeoutMs: opts.requestTimeoutMs,
+   retryAttempts: opts.retryAttempts,
+   recheckWindowMs: opts.recheckWindowMs,
+   inProgressStaleMs: opts.inProgressStaleMs,
+   skipPersistOnUnchanged: opts.skipPersistOnUnchanged,
+   userAgent: opts.userAgent,
+   stripQueryParams: opts.stripQueryParams,
+   extraHeaders: opts.extraHeaders,
+ };
 
   const throttle = new HostThrottle(perHostDelayMs);
 
@@ -394,14 +455,14 @@ export async function runWorkerLoop(
   const stripQueryParams = opts.stripQueryParams ?? [];
 
   const pageOpts = {
-    maxDepth,
-    requestTimeoutMs,
-    retryAttempts,
-    recheckWindowMs,
-    inProgressStaleMs,
-    skipPersistOnUnchanged,
-    userAgent,
-    stripQueryParams,
+    maxDepth: opts.maxDepth,
+    requestTimeoutMs: opts.requestTimeoutMs,
+    retryAttempts: opts.retryAttempts,
+    recheckWindowMs: opts.recheckWindowMs,
+    inProgressStaleMs: opts.inProgressStaleMs,
+    skipPersistOnUnchanged: opts.skipPersistOnUnchanged,
+    userAgent: opts.userAgent,
+    stripQueryParams: opts.stripQueryParams,
     extraHeaders: opts.extraHeaders,
   };
 

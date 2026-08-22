@@ -56,6 +56,26 @@ export interface PluginMatcher {
 /** Plugin-specific runtime options. */
 export type PluginOptions = Record<string, unknown>;
 
+/** Declarative crawl behavior for pages handled by a plugin. */
+export interface SitePluginCrawlPolicy {
+  /** Skip a page if it was already completed within this window. */
+  recheckWindowMs?: number;
+  /** Consider an in-progress claim stale after this many milliseconds. */
+  inProgressStaleMs?: number;
+  /** Maximum crawl depth for URLs matched by this plugin. */
+  maxDepth?: number;
+  /** Per-page request timeout for this plugin's matches. */
+  requestTimeoutMs?: number;
+  /** Retry budget for this plugin's fetches. */
+  retryAttempts?: number;
+  /** Skip persisting new items when the content hash has not changed. */
+  skipPersistOnUnchanged?: boolean;
+  /** Skip the network fetch entirely for matched pages. */
+  skipFetch?: boolean;
+  /** Whether to follow and enqueue links discovered on matched pages. */
+  followLinks?: boolean;
+}
+
 /** A site-specific parsing plugin registered with the crawl engine. */
 export interface SitePlugin {
   /** Unique name for this plugin (used in logs and registry). */
@@ -64,6 +84,8 @@ export interface SitePlugin {
   pageType: PageType;
   /** URL matchers used to select this plugin. */
   matchers?: PluginMatcher[];
+  /** Declarative crawl behavior for this plugin's matched pages. */
+  crawlPolicy?: SitePluginCrawlPolicy;
   /** Plugin-specific configuration. */
   options?: PluginOptions;
   /** Additional HTTP headers injected for all requests routed to this plugin. */

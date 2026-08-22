@@ -166,4 +166,66 @@ describe("runCrawl", () => {
 
     expect(summary.pagesVisited).toBeLessThanOrEqual(3);
   });
+
+  it("applies plugin crawlPolicy for recheck and skipFetch", async () => {
+    const parsePage = jest.fn(() => ({ items: [], links: [] }));
+    const tryClaim = jest.fn(async () => true);
+    const plugin: SitePlugin = {
+      name: "policy-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      crawlPolicy: {
+        recheckWindowMs: 1_234,
+        skipFetch: true,
+      },
+      parsePage,
+    };
+    registerPlugin(plugin);
+
+    const adapter: PersistenceAdapter = {
+      tryClaim,
+      markDone: async () => {},
+      markFailed: async () => {},
+      getOrCreateCanonical: async () => "",
+      saveItem: async () => {},
+    };
+
+    const summary = await runCrawl(["https://example.com/"], {
+      persistence: adapter,
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+      recheckWindowMs: 5_000,
+    });
+
+    expect(tryClaim).toHaveBeenCalledWith(
+      "https://example.com/",
+      expect.objectContaining({ recheckWindowMs: 5_000 })
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(parsePage).not.toHaveBeenCalled();
+    expect(summary.pagesParsed).toBe(0);
+  });
+
+  it("respects plugin crawlPolicy.followLinks", async () => {
+    const plugin: SitePlugin = {
+      name: "link-policy-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      crawlPolicy: { followLinks: false },
+      parsePage: () => ({
+        items: [],
+        links: ["https://example.com/next"],
+      }),
+    };
+    registerPlugin(plugin);
+    mockFetch.mockResolvedValue(makeHtmlResponse("<html></html>"));
+
+    const summary = await runCrawl(["https://example.com/"], {
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+      maxDepth: 3,
+    });
+
+    expect(summary.pagesVisited).toBe(1);
+  });
 });

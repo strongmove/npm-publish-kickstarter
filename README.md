@@ -72,7 +72,13 @@ import type { SitePlugin } from "@strongmove/crawler-core";
 // 1. Define a plugin for your target site.
 const MyPlugin: SitePlugin = {
   name: "my-site",
-  hostnames: ["mysite.com"],
+  pageType: "listing",
+  matchers: [{ type: "path", value: "/products" }],
+  crawlPolicy: {
+    recheckWindowMs: 60_000,
+    maxDepth: 1,
+    followLinks: true,
+  },
   parsePage(html, url, baseUrl) {
     // Use cheerio, regex, or any HTML parser here.
     return {
@@ -201,7 +207,21 @@ interface PageParseResult {
 ```typescript
 interface SitePlugin {
   name: string;
-  hostnames?: string[];                    // Routes by hostname; absent = catch-all
+  pageType: "listing" | "detail" | "other";
+  matchers?: Array<{
+    type: "exact" | "path" | "regex";
+    value: string | RegExp;
+  }>;
+  crawlPolicy?: {
+    recheckWindowMs?: number;
+    inProgressStaleMs?: number;
+    maxDepth?: number;
+    requestTimeoutMs?: number;
+    retryAttempts?: number;
+    skipPersistOnUnchanged?: boolean;
+    skipFetch?: boolean;
+    followLinks?: boolean;
+  };
   defaultHeaders?: Record<string, string>; // Injected for every request
   resolveBaseUrl?(url: string): string;    // Override base URL computation
   parsePage(html: string, url: string, baseUrl: string): Promise<PageParseResult> | PageParseResult;
@@ -352,8 +372,8 @@ clearPlugins();                   // Remove all (useful in tests)
 ```
 
 **Routing order:**
-1. Plugin whose `hostnames` contains the page's hostname (exact match).
-2. First catch-all plugin (no `hostnames` declared).
+1. Best URL match based on matcher specificity (`exact` > `path` > `regex`) and `pageType` priority (`detail` > `listing` > `other`).
+2. Catch-all `pageType: "other"` plugin if no more specific match exists.
 3. `undefined` → page is skipped with `markFailed`.
 
 ---
@@ -614,7 +634,16 @@ import * as cheerio from "cheerio";
 
 export const MySitePlugin: SitePlugin = {
   name: "my-site",
-  hostnames: ["mysite.com", "www.mysite.com"],
+  pageType: "listing",
+  matchers: [
+    { type: "path", value: "/products" },
+    { type: "regex", value: /\/products\/.*$/ },
+  ],
+  crawlPolicy: {
+    recheckWindowMs: 60_000,
+    maxDepth: 1,
+    followLinks: true,
+  },
 
   // Optional: custom base URL resolution
   resolveBaseUrl(url: string): string {
@@ -659,6 +688,29 @@ export const MySitePlugin: SitePlugin = {
 - `locations` must be non-empty for a `ParsedItem` to be meaningful.
 - Avoid blocking I/O in `parsePage` — keep it synchronous or fast-async.
 - Use `meta` for all domain-specific fields; keep `title` and `idHint` generic.
+
+### Declarative Crawl Policy
+
+`SitePlugin` now supports a `crawlPolicy` object for per-site fetch and recheck behavior. This is the declarative hook for logic that is site-specific but still belongs to the crawler core rather than being hidden inside `parsePage`.
+
+```ts
+const ListingPlugin: SitePlugin = {
+  name: "listing",
+  pageType: "listing",
+  matchers: [{ type: "path", value: "/listings" }],
+  crawlPolicy: {
+    recheckWindowMs: 30_000,
+    maxDepth: 1,
+    skipFetch: false,
+    followLinks: true,
+  },
+  parsePage(html, url, baseUrl) {
+    return { items: [], links: [], baseUrl };
+  },
+};
+```
+
+The engine merges plugin policy values with the top-level `runCrawl(...)` options, and the run-level values still win when explicitly supplied. This keeps plugin defaults reusable while letting a caller override them for a specific crawl.
 
 ---
 
