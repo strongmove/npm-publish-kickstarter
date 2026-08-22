@@ -31,6 +31,8 @@ describe("runCrawl", () => {
   it("visits seed URL, parses items, and returns summary", async () => {
     const plugin: SitePlugin = {
       name: "test-plugin",
+      pageType: "detail",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
       parsePage: () => ({
         items: [{ title: "Test Item", locations: ["https://example.com/file.mp4"] }],
         links: [],
@@ -64,6 +66,8 @@ describe("runCrawl", () => {
   it("follows links discovered during parse", async () => {
     const plugin: SitePlugin = {
       name: "link-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
       parsePage: (_html: string, url: string) => {
         if (url === "https://example.com/") {
           return { items: [], links: ["https://example.com/page1"] };
@@ -86,6 +90,8 @@ describe("runCrawl", () => {
   it("skips URLs that fail claim", async () => {
     const plugin: SitePlugin = {
       name: "claim-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
       parsePage: () => ({ items: [], links: [] }),
     };
     registerPlugin(plugin);
@@ -111,6 +117,8 @@ describe("runCrawl", () => {
   it("normalizes item title if normalizedTitle is absent", async () => {
     const plugin: SitePlugin = {
       name: "norm-plugin",
+      pageType: "detail",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
       parsePage: () => ({
         items: [{ title: "  HELLO WORLD  ", locations: ["https://x.com/f"] }],
         links: [],
@@ -140,6 +148,8 @@ describe("runCrawl", () => {
   it("respects maxPagesPerRun limit", async () => {
     const plugin: SitePlugin = {
       name: "multi-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
       parsePage: (_html: string, _url: string) => ({
         items: [],
         links: [`https://example.com/page${Math.random()}`],

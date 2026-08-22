@@ -2,7 +2,7 @@
  * Example SitePlugin for a simple static HTML site.
  *
  * This shows the minimum you need to implement to provide a plugin:
- * - `name` and `hostnames` to identify the plugin.
+ * - `name`, `pageType`, and `matchers` to route the plugin by URL.
  * - `parsePage` to extract items and outgoing links from raw HTML.
  *
  * In real usage, swap the manual parsing with a library like cheerio:
@@ -21,7 +21,8 @@ import type { SitePlugin, PageParseResult, ParsedItem } from "../types";
  */
 export const ExamplePlugin: SitePlugin = {
   name: "example-plugin",
-  hostnames: ["example.com"],
+  pageType: "detail",
+  matchers: [{ type: "path", value: "/" }],
 
   parsePage(html: string, url: string, baseUrl: string): PageParseResult {
     const items: ParsedItem[] = [];

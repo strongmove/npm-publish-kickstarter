@@ -42,12 +42,30 @@ export interface PageParseResult {
 // Plugin
 // ---------------------------------------------------------------------------
 
+/** Known page families the crawler routes by URL pattern. */
+export type PageType = "listing" | "detail" | "other";
+
+/** A URL matcher used to select a plugin for a page. */
+export interface PluginMatcher {
+  /** Matcher mode. */
+  type: "exact" | "path" | "regex";
+  /** Exact URL, pathname, or regular expression to match against. */
+  value: string | RegExp;
+}
+
+/** Plugin-specific runtime options. */
+export type PluginOptions = Record<string, unknown>;
+
 /** A site-specific parsing plugin registered with the crawl engine. */
 export interface SitePlugin {
   /** Unique name for this plugin (used in logs and registry). */
   name: string;
-  /** Optional list of hostnames this plugin handles (used by registry routing). */
-  hostnames?: string[];
+  /** Page family the plugin handles. */
+  pageType: PageType;
+  /** URL matchers used to select this plugin. */
+  matchers?: PluginMatcher[];
+  /** Plugin-specific configuration. */
+  options?: PluginOptions;
   /** Additional HTTP headers injected for all requests routed to this plugin. */
   defaultHeaders?: Record<string, string>;
   /** Override the base URL used for relative-href resolution. */

@@ -6,6 +6,9 @@
 export type {
   ParsedItem,
   PageParseResult,
+  PageType,
+  PluginMatcher,
+  PluginOptions,
   SitePlugin,
   PersistenceAdapter,
   QueueAdapter,
