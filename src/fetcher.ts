@@ -2,6 +2,21 @@ import { createHash } from "crypto";
 import { chromium } from "playwright";
 import type { FetchMode, FetchOptions } from "./types";
 
+export interface MediaManifest {
+  url: string;
+  kind: "m3u8" | "mpd" | "mp4" | "other";
+  contentType?: string;
+  status?: number;
+  body?: string;
+}
+
+export interface MediaCapture {
+  url: string;
+  kind: "manifest" | "segment";
+  contentType?: string;
+  status?: number;
+}
+
 /** Result of a successful fetch operation. */
 export interface FetchResult {
   html: string;
@@ -10,6 +25,9 @@ export interface FetchResult {
   contentHash: string;
   finalUrl: string;
   mode?: FetchMode;
+  manifest?: MediaManifest;
+  mediaUrls?: MediaCapture[];
+  networkLog?: MediaCapture[];
 }
 
 const DEFAULT_USER_AGENT =
@@ -42,6 +60,51 @@ export function computeContentHash(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
+function classifyManifestKind(url: string, contentType?: string): MediaManifest["kind"] | null {
+  const normalizedUrl = url.toLowerCase();
+  const normalizedType = (contentType ?? "").toLowerCase();
+
+  if (normalizedUrl.includes(".m3u8") || normalizedType.includes("application/vnd.apple.mpegurl")) {
+    return "m3u8";
+  }
+
+  if (normalizedUrl.includes(".mpd") || normalizedType.includes("application/dash+xml")) {
+    return "mpd";
+  }
+
+  if (normalizedUrl.includes(".mp4") || normalizedType.includes("video/mp4")) {
+    return "mp4";
+  }
+
+  return null;
+}
+
+function classifyMediaCapture(url: string, contentType?: string): MediaCapture["kind"] | null {
+  const normalizedUrl = url.toLowerCase();
+  const normalizedType = (contentType ?? "").toLowerCase();
+
+  if (normalizedUrl.includes(".m3u8") || normalizedType.includes("application/vnd.apple.mpegurl")) {
+    return "manifest";
+  }
+
+  if (normalizedUrl.includes(".mpd") || normalizedType.includes("application/dash+xml")) {
+    return "manifest";
+  }
+
+  if (
+    normalizedUrl.includes(".ts") ||
+    normalizedUrl.includes(".m4s") ||
+    normalizedUrl.includes(".mp4") ||
+    normalizedUrl.includes(".m4a") ||
+    normalizedType.includes("video/") ||
+    normalizedType.includes("audio/")
+  ) {
+    return "segment";
+  }
+
+  return null;
+}
+
 async function fetchPageBrowser(
   url: string,
   opts: { timeoutMs?: number; userAgent?: string; extraHeaders?: Record<string, string> }
@@ -59,6 +122,59 @@ async function fetchPageBrowser(
       userAgent,
     });
 
+    const captures: MediaCapture[] = [];
+    const manifestByUrl = new Map<string, MediaManifest>();
+    const pendingBodyReads: Promise<void>[] = [];
+    const seen = new Set<string>();
+
+    page.on("response", async (response) => {
+      const responseUrl = response.url();
+      const contentType = response.headers()["content-type"] ?? "";
+      const kind = classifyMediaCapture(responseUrl, contentType);
+
+      if (!kind) {
+        return;
+      }
+
+      const dedupeKey = `${kind}:${responseUrl}`;
+      if (!seen.has(dedupeKey)) {
+        seen.add(dedupeKey);
+        captures.push({
+          url: responseUrl,
+          kind,
+          contentType: contentType || undefined,
+          status: response.status(),
+        });
+      }
+
+      const manifestKind = classifyManifestKind(responseUrl, contentType);
+      if (!manifestKind || manifestByUrl.has(responseUrl) || manifestKind === "mp4") {
+        return;
+      }
+
+      pendingBodyReads.push(
+        response
+          .text()
+          .then((body) => {
+            manifestByUrl.set(responseUrl, {
+              url: responseUrl,
+              kind: manifestKind,
+              contentType: contentType || undefined,
+              status: response.status(),
+              body,
+            });
+          })
+          .catch(() => {
+            manifestByUrl.set(responseUrl, {
+              url: responseUrl,
+              kind: manifestKind,
+              contentType: contentType || undefined,
+              status: response.status(),
+            });
+          })
+      );
+    });
+
     try {
       await page.setExtraHTTPHeaders(extraHeaders);
       const response = await page.goto(url, {
@@ -70,6 +186,14 @@ async function fetchPageBrowser(
         .waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 2_500) })
         .catch(() => undefined);
 
+      await Promise.allSettled(pendingBodyReads);
+
+      const manifestCandidates = Array.from(manifestByUrl.values());
+      const manifest =
+        manifestCandidates.find((entry) => entry.url === url) ??
+        manifestCandidates.find((entry) => entry.url.includes(".m3u8") || entry.url.includes(".mpd")) ??
+        manifestCandidates[0];
+      const mediaUrls = captures.filter((capture) => capture.kind !== "manifest");
       const html = await page.content();
       const finalUrl = page.url() || url;
       const status = response?.status() ?? 200;
@@ -82,6 +206,9 @@ async function fetchPageBrowser(
         contentHash: computeContentHash(html),
         finalUrl,
         mode: "browser",
+        manifest,
+        mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
+        networkLog: captures.length > 0 ? captures : undefined,
       };
     } finally {
       try {
