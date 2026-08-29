@@ -17,6 +17,7 @@ export type {
   CrawlerOptions,
   CrawlSummary,
   FetchOptions,
+  FetchContext,
   FetchMode,
   FetchModeDecisionContext,
   FetchModeDecisionCallback,

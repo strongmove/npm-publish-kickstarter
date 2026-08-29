@@ -73,6 +73,50 @@ export interface FetchModeDecisionContext {
   pageType?: PageType;
 }
 
+/** Richer fetch payload passed to content parsers. */
+export interface FetchContext {
+  /** Original request URL. */
+  url: string;
+  /** Base URL used to resolve relative links. */
+  baseUrl: string;
+  /** Page HTML source for the final fetch result. */
+  html: string;
+  /** HTTP status code from the response, if any. */
+  status?: number;
+  /** ETag from the response, if any. */
+  etag?: string;
+  /** SHA-256 hash of the page HTML. */
+  contentHash?: string;
+  /** Final URL after redirects or browser rendering. */
+  finalUrl?: string;
+  /** Fetch strategy used to produce the page. */
+  mode?: FetchMode;
+  /** Media manifest discovered for the page, if any. */
+  manifest?: {
+    url: string;
+    kind: "m3u8" | "mpd" | "mp4" | "other";
+    contentType?: string;
+    status?: number;
+    body?: string;
+  };
+  /** Media resources discovered while fetching the page. */
+  mediaUrls?: Array<{
+    url: string;
+    kind: "manifest" | "segment";
+    contentType?: string;
+    status?: number;
+  }>;
+  /** Network log of captured media requests/responses. */
+  networkLog?: Array<{
+    url: string;
+    kind: "manifest" | "segment";
+    contentType?: string;
+    status?: number;
+  }>;
+  /** Extra fetch metadata added by adapters or future fetchers. */
+  metadata?: Record<string, unknown>;
+}
+
 /** Custom callback used by the automatic fetch strategy. */
 export type FetchModeDecisionCallback = (
   context: FetchModeDecisionContext
@@ -124,12 +168,17 @@ export interface SitePlugin {
   defaultHeaders?: Record<string, string>;
   /** Override the base URL used for relative-href resolution. */
   resolveBaseUrl?(url: string): string;
-  /** Parse an HTML page and return items + outgoing links. */
-  parsePage(
-    html: string,
-    url: string,
-    baseUrl: string
-  ): Promise<PageParseResult> | PageParseResult;
+  /**
+   * Legacy parse hook taking raw HTML and request metadata.
+   *
+   * Kept intentionally permissive because existing plugins historically used one
+   * of several call signatures (`parsePage(html)`, `parsePage(html, url)`,
+   * `parsePage(html, url, baseUrl)`) and newer plugins should prefer the richer
+   * `parseFetchedData(context)` hook instead.
+   */
+  parsePage?: (...args: any[]) => Promise<PageParseResult> | PageParseResult;
+  /** New richer parse hook receiving the full fetch context. */
+  parseFetchedData?(context: FetchContext): Promise<PageParseResult> | PageParseResult;
 }
 
 // ---------------------------------------------------------------------------

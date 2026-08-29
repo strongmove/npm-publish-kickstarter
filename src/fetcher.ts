@@ -199,7 +199,7 @@ async function fetchPageBrowser(
       const status = response?.status() ?? 200;
       const etag = response?.headers()["etag"];
 
-      return {
+      const result: FetchResult = {
         html,
         status,
         etag,
@@ -210,6 +210,7 @@ async function fetchPageBrowser(
         mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
         networkLog: captures.length > 0 ? captures : undefined,
       };
+      return result;
     } finally {
       try {
         await page.close();

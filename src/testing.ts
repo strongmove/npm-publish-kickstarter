@@ -17,7 +17,7 @@
  *   expect(result.items[0].title).toBeTruthy();
  */
 
-import type { SitePlugin, PageParseResult } from "./types";
+import type { SitePlugin, PageParseResult, FetchContext } from "./types";
 
 /**
  * Execute a plugin's parsePage against a raw HTML string and return the result.
@@ -34,7 +34,21 @@ export async function runPluginTest(
   baseUrl?: string
 ): Promise<PageParseResult> {
   const resolvedBase = baseUrl ?? (plugin.resolveBaseUrl?.(url) ?? url);
-  return plugin.parsePage(html, url, resolvedBase);
+  const context: FetchContext = {
+    url,
+    baseUrl: resolvedBase,
+    html,
+  };
+
+  if (plugin.parseFetchedData) {
+    return plugin.parseFetchedData(context);
+  }
+
+  if (plugin.parsePage) {
+    return plugin.parsePage(html, url, resolvedBase);
+  }
+
+  throw new Error("Plugin does not provide a supported parse hook.");
 }
 
 /**

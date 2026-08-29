@@ -90,9 +90,9 @@ function matchesPlugin(plugin: SitePlugin, url: string): boolean {
  * Call this before `runCrawl`.
  */
 export function registerPlugin(plugin: SitePlugin): void {
-  if (!plugin || typeof plugin.parsePage !== "function") {
+  if (!plugin || (!plugin.parsePage && !plugin.parseFetchedData)) {
     throw new Error(
-      `registerPlugin: plugin "${plugin?.name ?? "(unknown)"}" must implement parsePage.`
+      `registerPlugin: plugin "${plugin?.name ?? "(unknown)"}" must implement parsePage or parseFetchedData.`
     );
   }
 

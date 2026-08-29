@@ -37,6 +37,43 @@ describe("runCrawl", () => {
     expect(summary.itemsSaved).toBe(0);
   });
 
+  it("supports parseFetchedData as the richer parsing hook", async () => {
+    const parseFetchedData = jest.fn(() => ({
+      items: [{ title: "Fetched Item", locations: ["https://example.com/file.mp4"] }],
+      links: [],
+    }));
+
+    const plugin: SitePlugin = {
+      name: "fetched-plugin",
+      pageType: "detail",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      parseFetchedData,
+    };
+    registerPlugin(plugin);
+    mockFetch.mockResolvedValue(makeHtmlResponse("<html>hello</html>"));
+
+    const adapter: PersistenceAdapter = {
+      tryClaim: async () => true,
+      markDone: async () => {},
+      markFailed: async () => {},
+      getOrCreateCanonical: async () => "",
+      saveItem: async () => {},
+    };
+
+    await runCrawl(["https://example.com/"], {
+      persistence: adapter,
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+    });
+
+    expect(parseFetchedData).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://example.com/",
+        html: "<html>hello</html>",
+      })
+    );
+  });
+
   it("visits seed URL, parses items, and returns summary", async () => {
     const plugin: SitePlugin = {
       name: "test-plugin",
@@ -259,6 +296,7 @@ describe("runCrawl", () => {
     mockFetch.mockResolvedValue(makeHtmlResponse("<html><body><div class='native-shell'></div></body></html>"));
 
     const page = {
+      on: jest.fn(),
       setExtraHTTPHeaders: jest.fn(),
       goto: jest.fn().mockResolvedValue({
         status: () => 200,

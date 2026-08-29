@@ -1,10 +1,12 @@
 import type {
   CrawlerOptions,
   CrawlSummary,
+  FetchContext,
   FetchMode,
   FetchModeDecisionCallback,
   FetchModeDecisionContext,
   ParsedItem,
+  PageParseResult,
   PersistenceAdapter,
   QueueAdapter,
   QueueItem,
@@ -199,6 +201,26 @@ interface CrawlState {
 // processPage — single page worker logic
 // ---------------------------------------------------------------------------
 
+function buildFetchContext(
+  fetchResult: Awaited<ReturnType<typeof fetchPage>>,
+  url: string,
+  baseUrl: string
+): FetchContext {
+  return {
+    url,
+    baseUrl,
+    html: fetchResult.html,
+    status: fetchResult.status,
+    etag: fetchResult.etag,
+    contentHash: fetchResult.contentHash,
+    finalUrl: fetchResult.finalUrl,
+    mode: fetchResult.mode,
+    manifest: fetchResult.manifest,
+    mediaUrls: fetchResult.mediaUrls,
+    networkLog: fetchResult.networkLog,
+  };
+}
+
 async function processPage(
   item: QueueItem,
   state: CrawlState,
@@ -353,9 +375,17 @@ async function processPage(
   const baseUrl =
     plugin.resolveBaseUrl?.(fetchResult.finalUrl) ?? fetchResult.finalUrl;
 
-  let parseResult: Awaited<ReturnType<typeof plugin.parsePage>>;
+  let parseResult: PageParseResult;
   try {
-    parseResult = await plugin.parsePage(fetchResult.html, url, baseUrl);
+    const context = buildFetchContext(fetchResult, url, baseUrl);
+
+    if (plugin.parseFetchedData) {
+      parseResult = await plugin.parseFetchedData(context);
+    } else if (plugin.parsePage) {
+      parseResult = await plugin.parsePage(fetchResult.html, url, baseUrl);
+    } else {
+      throw new Error("Plugin does not provide a supported parse hook.");
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     emitter.error("parse.error", `Plugin parse failed`, { url, error: msg });
