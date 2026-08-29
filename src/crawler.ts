@@ -1,6 +1,9 @@
 import type {
   CrawlerOptions,
   CrawlSummary,
+  FetchMode,
+  FetchModeDecisionCallback,
+  FetchModeDecisionContext,
   ParsedItem,
   PersistenceAdapter,
   QueueAdapter,
@@ -31,6 +34,7 @@ const DEFAULTS = {
   inProgressStaleMs: 5 * 60 * 1_000, // 5 minutes
   userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   skipPersistOnUnchanged: false,
+  defaultFetchMode: "native",
 } as const;
 
 function applyPluginCrawlPolicy(
@@ -45,6 +49,8 @@ function applyPluginCrawlPolicy(
     userAgent?: string;
     stripQueryParams?: string[];
     extraHeaders?: Record<string, string>;
+    defaultFetchMode?: FetchMode;
+    defaultAutoFetchDecision?: FetchModeDecisionCallback;
   }
 ) {
   const policy = plugin?.crawlPolicy ?? {};
@@ -68,7 +74,113 @@ function applyPluginCrawlPolicy(
       DEFAULTS.skipPersistOnUnchanged,
     userAgent: opts.userAgent ?? DEFAULTS.userAgent,
     stripQueryParams: opts.stripQueryParams ?? [],
+    defaultFetchMode: opts.defaultFetchMode ?? policy.fetchMode ?? DEFAULTS.defaultFetchMode,
+    defaultAutoFetchDecision: opts.defaultAutoFetchDecision ?? policy.autoFetchDecision,
   };
+}
+
+function normalizeDecision(mode: string | undefined): FetchMode {
+  if (mode === "browser" || mode === "native" || mode === "auto") return mode;
+  return "native";
+}
+
+function stripHtmlText(html: string): string {
+  let result = "";
+  let cursor = 0;
+  const lowered = html.toLowerCase();
+
+  while (cursor < lowered.length) {
+    const tagStart = lowered.indexOf("<", cursor);
+    if (tagStart === -1) {
+      result += html.slice(cursor);
+      break;
+    }
+
+    result += html.slice(cursor, tagStart);
+    const tagEnd = lowered.indexOf(">", tagStart + 1);
+    if (tagEnd === -1) break;
+
+    const tag = lowered.slice(tagStart, tagEnd + 1);
+    const tagName = tag.match(/^<\s*\/?\s*([a-z0-9-]+)/i)?.[1]?.toLowerCase();
+
+    if (tagName === "script" || tagName === "style") {
+      const closingTag = lowered.indexOf(`</${tagName}`, tagEnd + 1);
+      const closingTagEnd =
+        closingTag === -1 ? lowered.length : lowered.indexOf(">", closingTag + 1);
+      if (closingTagEnd === -1) {
+        cursor = lowered.length;
+        break;
+      }
+      cursor = closingTagEnd + 1;
+      continue;
+    }
+
+    cursor = tagEnd + 1;
+  }
+
+  return result.replace(/\s+/g, " ").trim();
+}
+
+async function evaluateFetchMode(
+  plugin: SitePlugin | undefined,
+  opts: {
+    defaultFetchMode?: FetchMode;
+    defaultAutoFetchDecision?: FetchModeDecisionCallback;
+  },
+  html: string,
+  url: string,
+  status?: number
+): Promise<FetchMode> {
+  const policy = plugin?.crawlPolicy ?? {};
+  const configuredMode = normalizeDecision(
+    opts.defaultFetchMode ?? policy.fetchMode ?? DEFAULTS.defaultFetchMode
+  );
+
+  if (configuredMode !== "auto") {
+    return configuredMode;
+  }
+
+  const customDecision = opts.defaultAutoFetchDecision ?? policy.autoFetchDecision;
+  if (customDecision) {
+    const result = await customDecision({
+      url,
+      html,
+      status,
+      selectors: policy.requiredSelectors,
+      pageType: plugin?.pageType,
+    } satisfies FetchModeDecisionContext);
+    return normalizeDecision(result);
+  }
+
+  const selectors = policy.requiredSelectors ?? [];
+  const strippedHtml = stripHtmlText(html);
+  const minTextLength = policy.minTextLength ?? 80;
+  const textLength = strippedHtml.length;
+
+  let selectorMatches = 0;
+  for (const selector of selectors) {
+    const candidate = selector
+      .replace(/^[.#\s]+/, "")
+      .replace(/[\[\]:'"\s>+~]+/g, "")
+      .trim();
+
+    if (candidate && new RegExp(candidate, "i").test(html)) {
+      selectorMatches += 1;
+    }
+  }
+
+  if (html.trim().length === 0) return "browser";
+  if (textLength < minTextLength) return "browser";
+  if (selectors.length > 0 && selectorMatches < (policy.minSelectorMatches ?? 1)) {
+    return "browser";
+  }
+
+  const shellPattern = /__NEXT_DATA__|data-reactroot|react-root|id=["'](?:root|app)["']/i;
+  if (shellPattern.test(html) && textLength < minTextLength * 2) {
+    return "browser";
+  }
+
+  return "native";
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +213,8 @@ async function processPage(
       | "skipPersistOnUnchanged"
       | "userAgent"
       | "stripQueryParams"
+      | "defaultFetchMode"
+      | "defaultAutoFetchDecision"
     >
   > & { extraHeaders?: Record<string, string> },
   persistence: PersistenceAdapter,
@@ -176,17 +290,49 @@ async function processPage(
   // Merge plugin default headers.
   const pluginHeaders = plugin.defaultHeaders ?? {};
 
-  emitter.info("fetch.start", `Fetching page`, { url });
+  emitter.info("fetch.start", `Fetching page`, {
+    url,
+    fetchMode: effectivePageOpts.defaultFetchMode,
+  });
 
   let fetchResult: Awaited<ReturnType<typeof fetchPage>>;
   try {
+    const initialMode =
+      effectivePageOpts.defaultFetchMode === "browser" ? "browser" : "native";
+
     fetchResult = await fetchPage(url, {
       headers: pluginHeaders,
       timeoutMs: effectivePageOpts.requestTimeoutMs,
       retryAttempts: effectivePageOpts.retryAttempts,
       userAgent: effectivePageOpts.userAgent,
       extraHeaders: effectivePageOpts.extraHeaders,
+      mode: initialMode,
     });
+
+    if (effectivePageOpts.defaultFetchMode === "auto") {
+      const recommendedMode = await evaluateFetchMode(
+        plugin,
+        effectivePageOpts,
+        fetchResult.html,
+        url,
+        fetchResult.status
+      );
+
+      if (recommendedMode === "browser") {
+        emitter.info("fetch.auto.browser", `Auto mode selected browser rendering`, {
+          url,
+          reason: "native html score below threshold",
+        });
+        fetchResult = await fetchPage(url, {
+          headers: pluginHeaders,
+          timeoutMs: effectivePageOpts.requestTimeoutMs,
+          retryAttempts: effectivePageOpts.retryAttempts,
+          userAgent: effectivePageOpts.userAgent,
+          extraHeaders: effectivePageOpts.extraHeaders,
+          mode: "browser",
+        });
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     emitter.error("url.failed", `Fetch failed`, { url, error: msg });
@@ -200,6 +346,7 @@ async function processPage(
     url,
     status: fetchResult.status,
     contentHash: fetchResult.contentHash,
+    mode: fetchResult.mode,
   });
 
   // Parse page.
@@ -453,6 +600,7 @@ export async function runWorkerLoop(
   const skipPersistOnUnchanged =
     opts.skipPersistOnUnchanged ?? DEFAULTS.skipPersistOnUnchanged;
   const stripQueryParams = opts.stripQueryParams ?? [];
+  const defaultFetchMode = opts.defaultFetchMode ?? DEFAULTS.defaultFetchMode;
 
   const pageOpts = {
     maxDepth: opts.maxDepth,
@@ -464,6 +612,8 @@ export async function runWorkerLoop(
     userAgent: opts.userAgent,
     stripQueryParams: opts.stripQueryParams,
     extraHeaders: opts.extraHeaders,
+    defaultFetchMode,
+    defaultAutoFetchDecision: opts.defaultAutoFetchDecision,
   };
 
   const state: CrawlState = {

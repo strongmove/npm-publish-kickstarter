@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { FetchOptions } from "./types";
+import type { FetchMode, FetchOptions } from "./types";
 
 /** Result of a successful fetch operation. */
 export interface FetchResult {
@@ -8,6 +8,7 @@ export interface FetchResult {
   etag?: string;
   contentHash: string;
   finalUrl: string;
+  mode?: FetchMode;
 }
 
 const DEFAULT_USER_AGENT =
@@ -40,6 +41,7 @@ export async function fetchPage(
     retryBaseDelayMs = 300,
     userAgent = DEFAULT_USER_AGENT,
     extraHeaders = {},
+    mode = "native",
   } = opts;
 
   const mergedHeaders: Record<string, string> = {
@@ -78,6 +80,7 @@ export async function fetchPage(
         etag,
         contentHash,
         finalUrl: response.url || url,
+        mode,
       };
     } catch (err) {
       clearTimeout(timer);

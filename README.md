@@ -37,7 +37,7 @@ No domain-specific logic bundled — bring your own parser and database.
 
 `@strongmove/crawler-core` provides:
 
-- A **fetcher** (native `fetch`, retries, timeout, content-hash, etag capture).
+- A **fetcher** (native `fetch`, browser-render fallback, retries, timeout, content-hash, etag capture).
 - A **plugin registry** for site-specific HTML parsers.
 - A **worker pool** that manages concurrency, per-host throttling, depth limiting, and URL deduplication.
 - Pluggable **PersistenceAdapter** and **QueueAdapter** interfaces.
@@ -221,11 +221,55 @@ interface SitePlugin {
     skipPersistOnUnchanged?: boolean;
     skipFetch?: boolean;
     followLinks?: boolean;
+    fetchMode?: "native" | "browser" | "auto";
+    requiredSelectors?: string[];
+    minSelectorMatches?: number;
+    minTextLength?: number;
+    autoFetchDecision?: (ctx: {
+      url: string;
+      html: string;
+      status?: number;
+      selectors?: string[];
+      pageType?: "listing" | "detail" | "other";
+    }) => "native" | "browser" | "auto" | Promise<"native" | "browser" | "auto">;
   };
   defaultHeaders?: Record<string, string>; // Injected for every request
   resolveBaseUrl?(url: string): string;    // Override base URL computation
   parsePage(html: string, url: string, baseUrl: string): Promise<PageParseResult> | PageParseResult;
 }
+```
+
+#### Request strategies
+
+The crawler supports three request strategies for source acquisition:
+
+- `native`: use the lightweight HTTP fetch path by default. This is the fastest and easiest choice for server-rendered pages.
+- `browser`: use the browser-rendered path. This is appropriate for pages where the content is injected after JS runs.
+- `auto`: try `native` first, then decide whether the HTML is usable. If the page looks like an empty shell or the expected selectors are missing, switch to the browser path.
+
+`auto` is intended to preserve the static-first default while still handling JS-heavy pages. It supports a simple built-in heuristic and an optional custom callback for unusual cases.
+
+```typescript
+const MyPlugin: SitePlugin = {
+  name: "example",
+  pageType: "detail",
+  matchers: [{ type: "path", value: "/products" }],
+  crawlPolicy: {
+    fetchMode: "auto",
+    requiredSelectors: [".product-card", "article"],
+    minSelectorMatches: 1,
+    minTextLength: 200,
+    autoFetchDecision: async ({ html, url }) => {
+      if (html.includes("__NEXT_DATA__") && !html.includes("product-card")) {
+        return "browser";
+      }
+      return "native";
+    },
+  },
+  parsePage(html) {
+    return { items: [], links: [] };
+  },
+};
 ```
 
 #### `CrawlerOptions`
@@ -249,6 +293,14 @@ interface CrawlerOptions {
   userAgent?: string;
   skipPersistOnUnchanged?: boolean; // Default: false
   extraHeaders?: Record<string, string>;
+  defaultFetchMode?: "native" | "browser" | "auto"; // Default: "native"
+  defaultAutoFetchDecision?: (ctx: {
+    url: string;
+    html: string;
+    status?: number;
+    selectors?: string[];
+    pageType?: "listing" | "detail" | "other";
+  }) => "native" | "browser" | "auto" | Promise<"native" | "browser" | "auto">;
 }
 ```
 

@@ -56,6 +56,28 @@ export interface PluginMatcher {
 /** Plugin-specific runtime options. */
 export type PluginOptions = Record<string, unknown>;
 
+/** Strategy used to obtain page source before parsing. */
+export type FetchMode = "native" | "browser" | "auto";
+
+/** Metadata provided to custom fetch-strategy callbacks. */
+export interface FetchModeDecisionContext {
+  /** URL currently being processed. */
+  url: string;
+  /** The native HTML returned by the initial fetch. */
+  html: string;
+  /** HTTP status code from the native fetch, if available. */
+  status?: number;
+  /** List of selectors the plugin expects to find in a valid page. */
+  selectors?: string[];
+  /** Page family the plugin handles. */
+  pageType?: PageType;
+}
+
+/** Custom callback used by the automatic fetch strategy. */
+export type FetchModeDecisionCallback = (
+  context: FetchModeDecisionContext
+) => FetchMode | Promise<FetchMode>;
+
 /** Declarative crawl behavior for pages handled by a plugin. */
 export interface SitePluginCrawlPolicy {
   /** Skip a page if it was already completed within this window. */
@@ -74,6 +96,16 @@ export interface SitePluginCrawlPolicy {
   skipFetch?: boolean;
   /** Whether to follow and enqueue links discovered on matched pages. */
   followLinks?: boolean;
+  /** Preferred fetching strategy for this plugin. */
+  fetchMode?: FetchMode;
+  /** Optional selectors used to gauge whether native HTML is usable. */
+  requiredSelectors?: string[];
+  /** Minimum number of required selector matches before a page is considered usable. */
+  minSelectorMatches?: number;
+  /** Minimum meaningful text length before a native page is considered usable. */
+  minTextLength?: number;
+  /** Custom callback used when `fetchMode` is `auto`. */
+  autoFetchDecision?: FetchModeDecisionCallback;
 }
 
 /** A site-specific parsing plugin registered with the crawl engine. */
@@ -215,6 +247,8 @@ export interface FetchOptions {
   retryAttempts?: number;
   /** Base delay (ms) for exponential back-off between retries. */
   retryBaseDelayMs?: number;
+  /** Which fetching strategy to prefer for this request. */
+  mode?: FetchMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +287,10 @@ export interface CrawlerOptions {
   skipPersistOnUnchanged?: boolean;
   /** Extra HTTP headers injected for every request. */
   extraHeaders?: Record<string, string>;
+  /** Default fetch strategy for this crawl run. */
+  defaultFetchMode?: FetchMode;
+  /** Optional callback used when a plugin is configured with `fetchMode: "auto"`. */
+  defaultAutoFetchDecision?: FetchModeDecisionCallback;
 }
 
 // ---------------------------------------------------------------------------

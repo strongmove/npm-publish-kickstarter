@@ -228,4 +228,47 @@ describe("runCrawl", () => {
 
     expect(summary.pagesVisited).toBe(1);
   });
+
+  it("allows auto fetch mode to upgrade native HTML to browser content", async () => {
+    const plugin: SitePlugin = {
+      name: "auto-plugin",
+      pageType: "detail",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      crawlPolicy: {
+        fetchMode: "auto",
+        requiredSelectors: [".product-card"],
+        minSelectorMatches: 1,
+        autoFetchDecision: async ({ html }) =>
+          html.includes("native-shell") ? "browser" : "native",
+      },
+      parsePage: (html: string) => ({
+        items: html.includes("browser-loaded") ? [{ title: "Browser Item", locations: ["https://example.com/final"] }] : [],
+        links: [],
+      }),
+    };
+    registerPlugin(plugin);
+    mockFetch
+      .mockResolvedValueOnce(makeHtmlResponse("<html><body><div class='native-shell'></div></body></html>"))
+      .mockResolvedValueOnce(makeHtmlResponse("<html><body><div class='product-card'>browser-loaded</div></body></html>"));
+
+    const saved: ParsedItem[] = [];
+    const adapter: PersistenceAdapter = {
+      tryClaim: async () => true,
+      markDone: async () => {},
+      markFailed: async () => {},
+      getOrCreateCanonical: async () => "",
+      saveItem: async (item: ParsedItem) => { saved.push(item); },
+    };
+
+    const summary = await runCrawl(["https://example.com/"], {
+      persistence: adapter,
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+    });
+
+    expect(summary.pagesParsed).toBe(1);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].title).toBe("Browser Item");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
 });
