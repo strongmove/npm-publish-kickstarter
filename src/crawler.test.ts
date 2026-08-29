@@ -1,3 +1,11 @@
+const browserLaunchMock = jest.fn();
+
+jest.mock("playwright", () => ({
+  chromium: {
+    launch: browserLaunchMock,
+  },
+}));
+
 import { runCrawl } from "./crawler";
 import { registerPlugin, clearPlugins } from "./pluginRegistry";
 import type { SitePlugin, PersistenceAdapter, ParsedItem } from "./types";
@@ -19,6 +27,7 @@ function makeHtmlResponse(html: string, status = 200): Response {
 beforeEach(() => {
   clearPlugins();
   mockFetch.mockReset();
+  browserLaunchMock.mockReset();
 });
 
 describe("runCrawl", () => {
@@ -247,9 +256,24 @@ describe("runCrawl", () => {
       }),
     };
     registerPlugin(plugin);
-    mockFetch
-      .mockResolvedValueOnce(makeHtmlResponse("<html><body><div class='native-shell'></div></body></html>"))
-      .mockResolvedValueOnce(makeHtmlResponse("<html><body><div class='product-card'>browser-loaded</div></body></html>"));
+    mockFetch.mockResolvedValue(makeHtmlResponse("<html><body><div class='native-shell'></div></body></html>"));
+
+    const page = {
+      setExtraHTTPHeaders: jest.fn(),
+      goto: jest.fn().mockResolvedValue({
+        status: () => 200,
+        headers: () => ({ etag: '"etag-value"' }),
+      }),
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+      content: jest.fn().mockResolvedValue("<html><body><div class='product-card'>browser-loaded</div></body></html>"),
+      url: jest.fn().mockReturnValue("https://example.com/final"),
+      close: jest.fn(),
+    };
+    const browser = {
+      newPage: jest.fn().mockResolvedValue(page),
+      close: jest.fn(),
+    };
+    browserLaunchMock.mockResolvedValue(browser);
 
     const saved: ParsedItem[] = [];
     const adapter: PersistenceAdapter = {
@@ -269,6 +293,8 @@ describe("runCrawl", () => {
     expect(summary.pagesParsed).toBe(1);
     expect(saved).toHaveLength(1);
     expect(saved[0].title).toBe("Browser Item");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(browserLaunchMock).toHaveBeenCalledTimes(1);
+    expect(browser.close).toHaveBeenCalledTimes(1);
   });
 });

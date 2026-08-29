@@ -491,6 +491,21 @@ const result = await fetchPage("https://example.com/page", {
 // result.finalUrl     — URL after redirects
 ```
 
+The fetcher now includes a built-in browser path for `mode: "browser"` and `mode: "auto"` upgrades. It uses Playwright Chromium internally, so consumers do not need to provide their own browser instance or wire up a custom emulator.
+
+```typescript
+const browserResult = await fetchPage("https://example.com/js-page", {
+  mode: "browser",
+  timeoutMs: 15_000,
+});
+```
+
+If the browser binary is not installed yet, the first browser fetch will throw an actionable error telling you to run:
+
+```bash
+npx playwright install --with-deps chromium
+```
+
 ---
 
 ### 4.6 In-Memory Dev Adapters

@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { chromium } from "playwright";
 import type { FetchMode, FetchOptions } from "./types";
 
 /** Result of a successful fetch operation. */
@@ -14,6 +15,20 @@ export interface FetchResult {
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; crawler-core/1.0; +https://your-org.example)";
 
+async function getBrowser() {
+  try {
+    return await chromium.launch({ headless: true });
+  } catch (error) {
+    const msg =
+      error instanceof Error
+        ? error.message
+        : "Unknown Playwright launch error";
+    throw new Error(
+      `Browser fetch mode requires Playwright Chromium. Install it with "npx playwright install --with-deps chromium". Original error: ${msg}`
+    );
+  }
+}
+
 /** Delay helper. */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,6 +40,63 @@ function delay(ms: number): Promise<void> {
  */
 export function computeContentHash(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
+}
+
+async function fetchPageBrowser(
+  url: string,
+  opts: { timeoutMs?: number; userAgent?: string; extraHeaders?: Record<string, string> }
+): Promise<FetchResult> {
+  const {
+    timeoutMs = 10_000,
+    userAgent = DEFAULT_USER_AGENT,
+    extraHeaders = {},
+  } = opts;
+
+  const browser = await getBrowser();
+
+  try {
+    const page = await browser.newPage({
+      userAgent,
+    });
+
+    try {
+      await page.setExtraHTTPHeaders(extraHeaders);
+      const response = await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: timeoutMs,
+      });
+
+      await page
+        .waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 2_500) })
+        .catch(() => undefined);
+
+      const html = await page.content();
+      const finalUrl = page.url() || url;
+      const status = response?.status() ?? 200;
+      const etag = response?.headers()["etag"];
+
+      return {
+        html,
+        status,
+        etag,
+        contentHash: computeContentHash(html),
+        finalUrl,
+        mode: "browser",
+      };
+    } finally {
+      try {
+        await page.close();
+      } catch {
+        // ignore page close errors
+      }
+    }
+  } finally {
+    try {
+      await browser.close();
+    } catch {
+      // ignore browser shutdown errors
+    }
+  }
 }
 
 /**
@@ -43,6 +115,14 @@ export async function fetchPage(
     extraHeaders = {},
     mode = "native",
   } = opts;
+
+  if (mode === "browser") {
+    return fetchPageBrowser(url, {
+      timeoutMs,
+      userAgent,
+      extraHeaders: { ...extraHeaders, ...headers },
+    });
+  }
 
   const mergedHeaders: Record<string, string> = {
     "User-Agent": userAgent,

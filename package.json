@@ -1,6 +1,6 @@
 {
   "name": "@strongmove/crawler-core",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Generic crawl engine + plugin API: fetch, parse, persist, discover.",
   "private": false,
   "publishConfig": {
@@ -53,5 +53,8 @@
     "testMatch": [
       "**/*.test.ts"
     ]
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
   }
 }
