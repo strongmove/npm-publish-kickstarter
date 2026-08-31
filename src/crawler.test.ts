@@ -335,4 +335,70 @@ describe("runCrawl", () => {
     expect(browserLaunchMock).toHaveBeenCalledTimes(1);
     expect(browser.close).toHaveBeenCalledTimes(1);
   });
+
+  it("applies top-level auto fetch options during runCrawl", async () => {
+    const plugin: SitePlugin = {
+      name: "top-level-auto-plugin",
+      pageType: "detail",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      parsePage: (html: string) => ({
+        items: html.includes("browser-loaded")
+          ? [{ title: "Browser Item", locations: ["https://example.com/final"] }]
+          : [],
+        links: [],
+      }),
+    };
+    registerPlugin(plugin);
+    mockFetch.mockResolvedValue(
+      makeHtmlResponse("<html><body><div class='native-shell'></div></body></html>")
+    );
+
+    const page = {
+      on: jest.fn(),
+      setExtraHTTPHeaders: jest.fn(),
+      goto: jest.fn().mockResolvedValue({
+        status: () => 200,
+        headers: () => ({ etag: '"etag-value"' }),
+      }),
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+      content: jest
+        .fn()
+        .mockResolvedValue(
+          "<html><body><div class='product-card'>browser-loaded</div></body></html>"
+        ),
+      url: jest.fn().mockReturnValue("https://example.com/final"),
+      close: jest.fn(),
+    };
+    const browser = {
+      newPage: jest.fn().mockResolvedValue(page),
+      close: jest.fn(),
+    };
+    browserLaunchMock.mockResolvedValue(browser);
+
+    const saved: ParsedItem[] = [];
+    const adapter: PersistenceAdapter = {
+      tryClaim: async () => true,
+      markDone: async () => {},
+      markFailed: async () => {},
+      getOrCreateCanonical: async () => "",
+      saveItem: async (item: ParsedItem) => {
+        saved.push(item);
+      },
+    };
+
+    const summary = await runCrawl(["https://example.com/"], {
+      persistence: adapter,
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+      defaultFetchMode: "auto",
+      defaultAutoFetchDecision: async ({ html }) =>
+        html.includes("native-shell") ? "browser" : "native",
+    });
+
+    expect(summary.pagesParsed).toBe(1);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].title).toBe("Browser Item");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(browserLaunchMock).toHaveBeenCalledTimes(1);
+  });
 });

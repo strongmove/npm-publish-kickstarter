@@ -46,6 +46,20 @@ describe("InMemoryQueue", () => {
     expect(q.size).toBe(1);
   });
 
+  it("requeue preserves priority ordering", async () => {
+    const q = new InMemoryQueue();
+    await q.enqueue("https://low.com", { priority: 1 });
+    await q.enqueue("https://high.com", { priority: 10 });
+
+    const first = await q.dequeue();
+    expect(first?.url).toBe("https://high.com");
+
+    await q.requeue(first!.id);
+
+    const second = await q.dequeue();
+    expect(second?.url).toBe("https://high.com");
+  });
+
   it("includes depth in dequeued item", async () => {
     const q = new InMemoryQueue();
     await q.enqueue("https://a.com", { depth: 3 });

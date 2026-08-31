@@ -1,6 +1,6 @@
 {
   "name": "@strongmove/crawler-core",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Generic crawl engine + plugin API: fetch, parse, persist, discover.",
   "private": false,
   "publishConfig": {
@@ -27,7 +27,8 @@
   "scripts": {
     "build": "tsc",
     "test": "jest --passWithNoTests",
-    "lint": "eslint src --ext .ts",
+    "lint": "npm run typecheck",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

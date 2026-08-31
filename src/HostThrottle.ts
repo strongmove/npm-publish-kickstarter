@@ -18,12 +18,13 @@ export class HostThrottle {
   async wait(hostname: string): Promise<void> {
     const now = Date.now();
     const next = this.nextAllowedAt.get(hostname) ?? 0;
-    const waitMs = Math.max(0, next - now);
+    const scheduledAt = Math.max(now, next);
+    const waitMs = scheduledAt - now;
+
+    this.nextAllowedAt.set(hostname, scheduledAt + this.delayMs);
 
     if (waitMs > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
     }
-
-    this.nextAllowedAt.set(hostname, Date.now() + this.delayMs);
   }
 }

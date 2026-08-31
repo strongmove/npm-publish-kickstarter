@@ -158,7 +158,7 @@ CrawlSummary { pagesVisited, pagesParsed, itemsSaved, pagesFailed, elapsedMs }
 | In-run dedup | `Set<string>` of visited URLs per run |
 | Cross-run dedup | `persistence.tryClaim()` — coordinates across workers/runs |
 | Per-host politeness | `perHostDelayMs` (default 500 ms) |
-| Global workers | `globalConcurrency` (default 4) |
+| Global workers | `globalConcurrency` (default 1) |
 | Max depth | `maxDepth` (default 3) |
 | Max pages/run | `maxPagesPerRun` (default 1 000) |
 
@@ -281,7 +281,7 @@ interface CrawlerOptions {
   persistence?: PersistenceAdapter; // Default: NoopPersistenceAdapter
   queue?: QueueAdapter;             // Default: InMemoryQueue
   logger?: Logger;                  // Default: silent
-  globalConcurrency?: number;       // Default: 4
+  globalConcurrency?: number;       // Default: 1
   perHostDelayMs?: number;          // Default: 500
   requestTimeoutMs?: number;        // Default: 10 000
   retryAttempts?: number;           // Default: 2
@@ -785,7 +785,7 @@ The engine merges plugin policy values with the top-level `runCrawl(...)` option
 
 | Option | Default | Description |
 |---|---|---|
-| `globalConcurrency` | `4` | Parallel page workers |
+| `globalConcurrency` | `1` | Parallel page workers |
 | `perHostDelayMs` | `500` | Min delay between requests to same host |
 | `requestTimeoutMs` | `10 000` | Per-page fetch timeout |
 | `retryAttempts` | `2` | Retries on transient network errors |
@@ -993,8 +993,11 @@ it("crawls and saves items", async () => {
 ### Running tests
 
 ```bash
+npm ci            # Install dependencies
 npm test          # Run all tests
-npm run build     # TypeScript compilation check
+npm run lint      # CI-friendly alias for static validation
+npm run typecheck # Type-check without emitting build artifacts
+npm run build     # Compile the distributable output
 ```
 
 ---

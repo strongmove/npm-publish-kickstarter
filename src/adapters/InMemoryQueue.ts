@@ -10,20 +10,31 @@ export class InMemoryQueue implements QueueAdapter {
   private inFlight = new Map<string, QueueItem>();
   private counter = 0;
 
+  private insertPending(item: QueueItem): void {
+    const itemPriority = item.priority ?? 0;
+    const insertAt = this.pending.findIndex(
+      (candidate) => (candidate.priority ?? 0) < itemPriority
+    );
+
+    if (insertAt === -1) {
+      this.pending.push(item);
+      return;
+    }
+
+    this.pending.splice(insertAt, 0, item);
+  }
+
   async enqueue(
     url: string,
     opts: { priority?: number; depth?: number } = {}
   ): Promise<void> {
     const id = String(++this.counter);
-    this.pending.push({
+    this.insertPending({
       id,
       url,
       priority: opts.priority ?? 0,
       depth: opts.depth ?? 0,
     });
-
-    // Sort descending by priority so highest-priority items come first.
-    this.pending.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   }
 
   async dequeue(): Promise<QueueItem | null> {
@@ -44,7 +55,7 @@ export class InMemoryQueue implements QueueAdapter {
     this.inFlight.delete(itemId);
 
     const reEnqueue = () => {
-      this.pending.push(item);
+      this.insertPending(item);
     };
 
     if (opts.delay && opts.delay > 0) {

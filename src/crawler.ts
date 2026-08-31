@@ -541,6 +541,8 @@ export async function runCrawl(
    userAgent: opts.userAgent,
    stripQueryParams: opts.stripQueryParams,
    extraHeaders: opts.extraHeaders,
+   defaultFetchMode: opts.defaultFetchMode,
+   defaultAutoFetchDecision: opts.defaultAutoFetchDecision,
  };
 
   const throttle = new HostThrottle(perHostDelayMs);
