@@ -224,4 +224,54 @@ describe("fetchPage", () => {
     );
     expect(result.status).toBe(200);
   });
+
+  it("captures URLs discovered by browser-triggered navigation", async () => {
+    const setExtraHTTPHeaders = jest.fn();
+    const goto = jest.fn().mockResolvedValue({
+      status: () => 200,
+      headers: () => ({ etag: '"discovery"' }),
+    });
+    const page = {
+      on: jest.fn(),
+      setExtraHTTPHeaders,
+      goto,
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+      waitForSelector: jest.fn().mockResolvedValue(undefined),
+      locator: jest.fn().mockImplementation(() => ({
+        count: jest.fn().mockResolvedValue(2),
+        nth: jest.fn((index: number) => ({
+          click: jest.fn().mockImplementation(async () => {
+            page.url = jest.fn().mockReturnValue(
+              index === 0 ? "https://example.com/books?page=1" : "https://example.com/books?page=3"
+            );
+          }),
+        })),
+      })),
+      waitForURL: jest.fn().mockResolvedValue(undefined),
+      content: jest.fn().mockResolvedValue("<html><body>listing</body></html>"),
+      url: jest.fn().mockReturnValue("https://example.com/listing"),
+      close: jest.fn(),
+      waitForNavigation: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn().mockResolvedValue(undefined),
+    };
+
+    launchMock.mockResolvedValue({
+      newPage: jest.fn().mockResolvedValue(page),
+    });
+
+    const result = await fetchPage("https://example.com/listing", {
+      mode: "browser",
+      timeoutMs: 5_000,
+      browserFlow: {
+        steps: [{ kind: "clickAndCaptureUrl", selector: "button[data-page]" }],
+      },
+    });
+
+    expect(result.browserFlow?.discoveredUrls).toEqual(
+      expect.arrayContaining([
+        "https://example.com/books?page=1",
+        "https://example.com/books?page=3",
+      ])
+    );
+  });
 });

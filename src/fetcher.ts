@@ -117,6 +117,7 @@ async function runBrowserActionPlan(
 ): Promise<BrowserFlowResult> {
   const errors: string[] = [];
   const totalSteps = Math.min(plan.steps.length, plan.maxSteps ?? plan.steps.length);
+  const discoveredUrls = new Set<string>();
   let stepsExecuted = 0;
 
   for (let index = 0; index < totalSteps; index++) {
@@ -144,6 +145,30 @@ async function runBrowserActionPlan(
           await target.click({ timeout: stepTimeout });
           if (step.waitForUrlPattern) {
             await page.waitForURL(step.waitForUrlPattern, { timeout: stepTimeout });
+          }
+          break;
+        }
+        case "clickAndCaptureUrl": {
+          if (!step.selector) {
+            throw new Error("clickAndCaptureUrl requires a selector");
+          }
+          const targets = page.locator(step.selector);
+          const count = await targets.count().catch(() => 0);
+
+          for (let i = 0; i < count; i++) {
+            const target = targets.nth(i);
+            const beforeUrl = page.url();
+            await target.click({ timeout: stepTimeout });
+            if (step.waitForUrlPattern) {
+              await page.waitForURL(step.waitForUrlPattern, { timeout: stepTimeout });
+            }
+            const finalUrl = page.url();
+            if (finalUrl && finalUrl !== beforeUrl) {
+              discoveredUrls.add(finalUrl);
+            }
+            if (step.waitForUrlPattern && page.url() !== beforeUrl) {
+              await page.waitForLoadState("domcontentloaded", { timeout: stepTimeout }).catch(() => undefined);
+            }
           }
           break;
         }
@@ -203,6 +228,7 @@ async function runBrowserActionPlan(
     finalUrl: page.url() || "",
     html: await page.content(),
     status: undefined,
+    discoveredUrls: discoveredUrls.size > 0 ? Array.from(discoveredUrls) : undefined,
     stepsExecuted,
     errors,
   };

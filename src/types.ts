@@ -126,6 +126,7 @@ export type FetchModeDecisionCallback = (
 
 export type BrowserActionKind =
   | "click"
+  | "clickAndCaptureUrl"
   | "waitForSelector"
   | "type"
   | "press"
@@ -167,6 +168,8 @@ export interface BrowserFlowResult {
   html: string;
   /** Final HTTP status code, when available. */
   status?: number;
+  /** URLs discovered during browser-driven navigation, such as button-triggered routes. */
+  discoveredUrls?: string[];
   /** Number of steps executed before stopping or finishing. */
   stepsExecuted: number;
   /** Error messages captured while running the flow. */
