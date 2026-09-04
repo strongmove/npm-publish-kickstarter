@@ -7,6 +7,7 @@ jest.mock("playwright", () => ({
 }));
 
 import { runCrawl } from "./crawler";
+import * as fetcher from "./fetcher";
 import { registerPlugin, clearPlugins } from "./pluginRegistry";
 import type { SitePlugin, PersistenceAdapter, ParsedItem } from "./types";
 
@@ -131,6 +132,42 @@ describe("runCrawl", () => {
     });
 
     expect(summary.pagesVisited).toBe(2);
+  });
+
+  it("does not auto-enqueue URLs captured by browserFlow", async () => {
+    const plugin: SitePlugin = {
+      name: "browser-flow-plugin",
+      pageType: "other",
+      matchers: [{ type: "regex", value: /^https:\/\/example\.com\/.*$/ }],
+      parsePage: () => ({ items: [], links: [] }),
+    };
+    registerPlugin(plugin);
+
+    const fetchPageSpy = jest.spyOn(fetcher, "fetchPage").mockResolvedValue({
+      html: "<html></html>",
+      status: 200,
+      contentHash: "hash",
+      finalUrl: "https://example.com/",
+      mode: "browser",
+      browserFlow: {
+        finalUrl: "https://example.com/next",
+        html: "<html></html>",
+        status: 200,
+        discoveredUrls: ["https://example.com/next"],
+        stepsExecuted: 1,
+        errors: [],
+      },
+    });
+
+    const summary = await runCrawl(["https://example.com/"], {
+      globalConcurrency: 1,
+      perHostDelayMs: 0,
+      maxDepth: 1,
+    });
+
+    expect(summary.pagesVisited).toBe(1);
+    expect(fetchPageSpy).toHaveBeenCalledTimes(1);
+    fetchPageSpy.mockRestore();
   });
 
   it("skips URLs that fail claim", async () => {

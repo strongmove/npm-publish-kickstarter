@@ -470,7 +470,6 @@ async function processPage(
 
   // Enqueue discovered links.
   const resolveBase = parseResult.baseUrl ?? baseUrl;
-  const discoveredBrowserUrls = fetchResult.browserFlow?.discoveredUrls ?? [];
 
   if (plugin.crawlPolicy?.followLinks === false) {
     emitter.info("link.skip", `Plugin crawl policy disabled link following`, {
@@ -481,16 +480,6 @@ async function processPage(
 
     for (const link of parseResult.links) {
       const resolved = resolveHref(resolveBase, link, {
-        stripQueryParams: effectivePageOpts.stripQueryParams,
-      });
-
-      if (!resolved) continue;
-      if (state.visited.has(resolved)) continue;
-      queuedLinks.add(resolved);
-    }
-
-    for (const discoveredUrl of discoveredBrowserUrls) {
-      const resolved = resolveHref(resolveBase, discoveredUrl, {
         stripQueryParams: effectivePageOpts.stripQueryParams,
       });
 
