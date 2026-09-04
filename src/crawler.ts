@@ -1,4 +1,5 @@
 import type {
+  BrowserActionPlan,
   CrawlerOptions,
   CrawlSummary,
   FetchContext,
@@ -52,6 +53,8 @@ function applyPluginCrawlPolicy(
     stripQueryParams?: string[];
     extraHeaders?: Record<string, string>;
     defaultFetchMode?: FetchMode;
+    browserFlow?: BrowserActionPlan;
+    browserInteractionMode?: "disabled" | "basic";
     defaultAutoFetchDecision?: FetchModeDecisionCallback;
   }
 ) {
@@ -77,6 +80,8 @@ function applyPluginCrawlPolicy(
     userAgent: opts.userAgent ?? DEFAULTS.userAgent,
     stripQueryParams: opts.stripQueryParams ?? [],
     defaultFetchMode: opts.defaultFetchMode ?? policy.fetchMode ?? DEFAULTS.defaultFetchMode,
+    browserFlow: opts.browserFlow ?? policy.browserFlow,
+    browserInteractionMode: opts.browserInteractionMode ?? policy.browserInteractionMode ?? "disabled",
     defaultAutoFetchDecision: opts.defaultAutoFetchDecision ?? policy.autoFetchDecision,
   };
 }
@@ -218,6 +223,7 @@ function buildFetchContext(
     manifest: fetchResult.manifest,
     mediaUrls: fetchResult.mediaUrls,
     networkLog: fetchResult.networkLog,
+    browserFlow: fetchResult.browserFlow,
   };
 }
 
@@ -236,7 +242,9 @@ async function processPage(
       | "userAgent"
       | "stripQueryParams"
       | "defaultFetchMode"
-      | "defaultAutoFetchDecision"
+    | "browserFlow"
+    | "browserInteractionMode"
+    | "defaultAutoFetchDecision"
     >
   > & { extraHeaders?: Record<string, string> },
   persistence: PersistenceAdapter,
@@ -329,6 +337,7 @@ async function processPage(
       userAgent: effectivePageOpts.userAgent,
       extraHeaders: effectivePageOpts.extraHeaders,
       mode: initialMode,
+      browserFlow: effectivePageOpts.browserFlow,
     });
 
     if (effectivePageOpts.defaultFetchMode === "auto") {
@@ -352,6 +361,7 @@ async function processPage(
           userAgent: effectivePageOpts.userAgent,
           extraHeaders: effectivePageOpts.extraHeaders,
           mode: "browser",
+          browserFlow: effectivePageOpts.browserFlow,
         });
       }
     }

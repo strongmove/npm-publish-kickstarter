@@ -1,6 +1,11 @@
 import { createHash } from "crypto";
 import { chromium } from "playwright";
-import type { FetchMode, FetchOptions } from "./types";
+import type {
+  BrowserActionPlan,
+  BrowserFlowResult,
+  FetchMode,
+  FetchOptions,
+} from "./types";
 
 export interface MediaManifest {
   url: string;
@@ -28,6 +33,7 @@ export interface FetchResult {
   manifest?: MediaManifest;
   mediaUrls?: MediaCapture[];
   networkLog?: MediaCapture[];
+  browserFlow?: BrowserFlowResult;
 }
 
 const DEFAULT_USER_AGENT =
@@ -105,9 +111,111 @@ function classifyMediaCapture(url: string, contentType?: string): MediaCapture["
   return null;
 }
 
+async function runBrowserActionPlan(
+  page: any,
+  plan: BrowserActionPlan
+): Promise<BrowserFlowResult> {
+  const errors: string[] = [];
+  const totalSteps = Math.min(plan.steps.length, plan.maxSteps ?? plan.steps.length);
+  let stepsExecuted = 0;
+
+  for (let index = 0; index < totalSteps; index++) {
+    const step = plan.steps[index];
+    const stepTimeout = step.timeoutMs ?? plan.timeoutMs ?? 5_000;
+    const previousUrl = page.url();
+
+    try {
+      switch (step.kind) {
+        case "waitForSelector": {
+          if (!step.selector) {
+            throw new Error("waitForSelector requires a selector");
+          }
+          await page.waitForSelector(step.selector, { state: "visible", timeout: stepTimeout });
+          break;
+        }
+        case "click": {
+          if (!step.selector) {
+            throw new Error("click requires a selector");
+          }
+          const target =
+            step.index !== undefined
+              ? page.locator(step.selector).nth(step.index)
+              : page.locator(step.selector);
+          await target.click({ timeout: stepTimeout });
+          if (step.waitForUrlPattern) {
+            await page.waitForURL(step.waitForUrlPattern, { timeout: stepTimeout });
+          }
+          break;
+        }
+        case "type": {
+          if (!step.selector) {
+            throw new Error("type requires a selector");
+          }
+          const target =
+            step.index !== undefined
+              ? page.locator(step.selector).nth(step.index)
+              : page.locator(step.selector);
+          await target.fill(step.text ?? "", { timeout: stepTimeout });
+          break;
+        }
+        case "press": {
+          if (!step.selector) {
+            throw new Error("press requires a selector");
+          }
+          const target =
+            step.index !== undefined
+              ? page.locator(step.selector).nth(step.index)
+              : page.locator(step.selector);
+          await target.press(step.text ?? "Enter", { timeout: stepTimeout });
+          break;
+        }
+        case "waitForNavigation": {
+          await page.waitForNavigation({ timeout: stepTimeout, waitUntil: "domcontentloaded" });
+          break;
+        }
+        case "evaluate": {
+          await page.evaluate(step.text ?? "() => undefined");
+          break;
+        }
+        default: {
+          errors.push(`Unsupported browser action: ${String((step as { kind?: string }).kind)}`);
+          break;
+        }
+      }
+
+      if (plan.waitForNetworkIdleAfterStep) {
+        await page.waitForLoadState("networkidle", { timeout: Math.min(stepTimeout, 2_500) }).catch(() => undefined);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`Step ${index + 1} (${step.kind}) failed: ${message}`);
+      break;
+    }
+
+    stepsExecuted += 1;
+
+    if (plan.stopOnNavigation && page.url() !== previousUrl) {
+      break;
+    }
+  }
+
+  return {
+    finalUrl: page.url() || "",
+    html: await page.content(),
+    status: undefined,
+    stepsExecuted,
+    errors,
+  };
+}
+
 async function fetchPageBrowser(
   url: string,
-  opts: { timeoutMs?: number; userAgent?: string; extraHeaders?: Record<string, string> }
+  opts: {
+    timeoutMs?: number;
+    userAgent?: string;
+    extraHeaders?: Record<string, string>;
+    browserFlow?: BrowserActionPlan;
+  }
 ): Promise<FetchResult> {
   const {
     timeoutMs = 10_000,
@@ -186,6 +294,12 @@ async function fetchPageBrowser(
         .waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 2_500) })
         .catch(() => undefined);
 
+      const browserFlow = opts.browserFlow;
+      let browserFlowResult: BrowserFlowResult | undefined;
+      if (browserFlow && browserFlow.steps.length > 0) {
+        browserFlowResult = await runBrowserActionPlan(page, browserFlow);
+      }
+
       await Promise.allSettled(pendingBodyReads);
 
       const manifestCandidates = Array.from(manifestByUrl.values());
@@ -194,8 +308,8 @@ async function fetchPageBrowser(
         manifestCandidates.find((entry) => entry.url.includes(".m3u8") || entry.url.includes(".mpd")) ??
         manifestCandidates[0];
       const mediaUrls = captures.filter((capture) => capture.kind !== "manifest");
-      const html = await page.content();
-      const finalUrl = page.url() || url;
+      const html = browserFlowResult?.html ?? (await page.content());
+      const finalUrl = browserFlowResult?.finalUrl || page.url() || url;
       const status = response?.status() ?? 200;
       const etag = response?.headers()["etag"];
 
@@ -209,6 +323,7 @@ async function fetchPageBrowser(
         manifest,
         mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
         networkLog: captures.length > 0 ? captures : undefined,
+        browserFlow: browserFlowResult,
       };
       return result;
     } finally {
@@ -242,6 +357,7 @@ export async function fetchPage(
     userAgent = DEFAULT_USER_AGENT,
     extraHeaders = {},
     mode = "native",
+    browserFlow,
   } = opts;
 
   if (mode === "browser") {
@@ -249,6 +365,7 @@ export async function fetchPage(
       timeoutMs,
       userAgent,
       extraHeaders: { ...extraHeaders, ...headers },
+      browserFlow,
     });
   }
 

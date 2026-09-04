@@ -97,6 +97,14 @@ describe("fetchPage", () => {
       content,
       url: jest.fn().mockReturnValue("https://example.com/final"),
       close,
+      waitForSelector: jest.fn(),
+      locator: jest.fn().mockImplementation(() => ({
+        click: jest.fn(),
+        nth: jest.fn().mockImplementation(() => ({ click: jest.fn() })),
+      })),
+      waitForNavigation: jest.fn(),
+      waitForURL: jest.fn(),
+      evaluate: jest.fn(),
     };
 
     launchMock.mockResolvedValue({
@@ -129,5 +137,91 @@ describe("fetchPage", () => {
         }),
       ])
     );
+  });
+
+  it("runs a declarative browser flow before returning the final HTML", async () => {
+    const click = jest.fn().mockResolvedValue(undefined);
+    const setExtraHTTPHeaders = jest.fn();
+    const goto = jest.fn().mockResolvedValue({
+      status: () => 200,
+      headers: () => ({ etag: '"after-click"' }),
+    });
+    const page = {
+      on: jest.fn(),
+      setExtraHTTPHeaders,
+      goto,
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+      waitForSelector: jest.fn().mockResolvedValue(undefined),
+      locator: jest.fn().mockReturnValue({
+        click,
+      }),
+      waitForURL: jest.fn().mockResolvedValue(undefined),
+      content: jest.fn().mockResolvedValue("<html><body>after click</body></html>"),
+      url: jest.fn().mockReturnValue("https://example.com/final"),
+      close: jest.fn(),
+      waitForNavigation: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn().mockResolvedValue(undefined),
+    };
+
+    launchMock.mockResolvedValue({
+      newPage: jest.fn().mockResolvedValue(page),
+    });
+
+    const result = await fetchPage("https://example.com/", {
+      mode: "browser",
+      timeoutMs: 5_000,
+      browserFlow: {
+        steps: [
+          { kind: "click", selector: ".load-more" },
+          { kind: "waitForSelector", selector: ".results" },
+        ],
+      },
+    });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(result.html).toBe("<html><body>after click</body></html>");
+    expect(result.browserFlow).toMatchObject({
+      stepsExecuted: 2,
+      errors: [],
+    });
+  });
+
+  it("collects browser flow errors without failing the fetch", async () => {
+    const setExtraHTTPHeaders = jest.fn();
+    const goto = jest.fn().mockResolvedValue({
+      status: () => 200,
+      headers: () => ({ etag: '"failed"' }),
+    });
+    const page = {
+      on: jest.fn(),
+      setExtraHTTPHeaders,
+      goto,
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+      waitForSelector: jest.fn().mockRejectedValue(new Error("selector not found")),
+      locator: jest.fn().mockReturnValue({ click: jest.fn() }),
+      waitForURL: jest.fn().mockResolvedValue(undefined),
+      content: jest.fn().mockResolvedValue("<html><body>fallback</body></html>"),
+      url: jest.fn().mockReturnValue("https://example.com/fallback"),
+      close: jest.fn(),
+      waitForNavigation: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn().mockResolvedValue(undefined),
+    };
+
+    launchMock.mockResolvedValue({
+      newPage: jest.fn().mockResolvedValue(page),
+    });
+
+    const result = await fetchPage("https://example.com/", {
+      mode: "browser",
+      timeoutMs: 5_000,
+      browserFlow: {
+        steps: [{ kind: "waitForSelector", selector: ".missing" }],
+      },
+    });
+
+    expect(result.browserFlow?.errors).toEqual(
+      expect.arrayContaining([expect.stringContaining("selector not found")])
+    );
+    expect(result.status).toBe(200);
   });
 });

@@ -115,12 +115,63 @@ export interface FetchContext {
   }>;
   /** Extra fetch metadata added by adapters or future fetchers. */
   metadata?: Record<string, unknown>;
+  /** Optional browser interaction flow metadata captured during fetch. */
+  browserFlow?: BrowserFlowResult;
 }
 
 /** Custom callback used by the automatic fetch strategy. */
 export type FetchModeDecisionCallback = (
   context: FetchModeDecisionContext
 ) => FetchMode | Promise<FetchMode>;
+
+export type BrowserActionKind =
+  | "click"
+  | "waitForSelector"
+  | "type"
+  | "press"
+  | "waitForNavigation"
+  | "evaluate";
+
+export interface BrowserActionStep {
+  /** Action kind to perform in the browser. */
+  kind: BrowserActionKind;
+  /** CSS selector to locate the target element. */
+  selector?: string;
+  /** Text value for type/press/evaluate actions. */
+  text?: string;
+  /** Optional index when targeting a collection. */
+  index?: number;
+  /** Timeout for this individual step, in milliseconds. */
+  timeoutMs?: number;
+  /** Optional URL pattern to wait for after the action completes. */
+  waitForUrlPattern?: string | RegExp;
+}
+
+export interface BrowserActionPlan {
+  /** Ordered browser steps to run before parsing. */
+  steps: BrowserActionStep[];
+  /** Maximum number of steps to execute. Defaults to the full plan length. */
+  maxSteps?: number;
+  /** Shared timeout for steps without an individual override. */
+  timeoutMs?: number;
+  /** Whether to stop once the page navigates away. */
+  stopOnNavigation?: boolean;
+  /** Whether to wait for network idle after each step. */
+  waitForNetworkIdleAfterStep?: boolean;
+}
+
+export interface BrowserFlowResult {
+  /** Final URL after interaction. */
+  finalUrl: string;
+  /** Final page HTML snapshot after interaction. */
+  html: string;
+  /** Final HTTP status code, when available. */
+  status?: number;
+  /** Number of steps executed before stopping or finishing. */
+  stepsExecuted: number;
+  /** Error messages captured while running the flow. */
+  errors: string[];
+}
 
 /** Declarative crawl behavior for pages handled by a plugin. */
 export interface SitePluginCrawlPolicy {
@@ -142,6 +193,10 @@ export interface SitePluginCrawlPolicy {
   followLinks?: boolean;
   /** Preferred fetching strategy for this plugin. */
   fetchMode?: FetchMode;
+  /** Optional declarative browser interaction flow used after the page loads. */
+  browserFlow?: BrowserActionPlan;
+  /** Browser interaction support mode for a plugin. */
+  browserInteractionMode?: "disabled" | "basic";
   /** Optional selectors used to gauge whether native HTML is usable. */
   requiredSelectors?: string[];
   /** Minimum number of required selector matches before a page is considered usable. */
@@ -298,6 +353,8 @@ export interface FetchOptions {
   retryBaseDelayMs?: number;
   /** Which fetching strategy to prefer for this request. */
   mode?: FetchMode;
+  /** Optional browser interaction plan to run before the final HTML is returned. */
+  browserFlow?: BrowserActionPlan;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +395,10 @@ export interface CrawlerOptions {
   extraHeaders?: Record<string, string>;
   /** Default fetch strategy for this crawl run. */
   defaultFetchMode?: FetchMode;
+  /** Optional browser interaction plan to run when a browser fetch is selected. */
+  browserFlow?: BrowserActionPlan;
+  /** Browser interaction support mode for this crawl run. */
+  browserInteractionMode?: "disabled" | "basic";
   /** Optional callback used when a plugin is configured with `fetchMode: "auto"`. */
   defaultAutoFetchDecision?: FetchModeDecisionCallback;
 }
