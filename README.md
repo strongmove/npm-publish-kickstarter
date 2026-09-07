@@ -44,8 +44,9 @@ It will ask for:
 - repository name
 - codename
 - description
+- GitHub token if `GITHUB_TOKEN` or `NODE_AUTH_TOKEN` are not already set
 
-Then it updates the package metadata and publishing configuration to match your new library.
+It validates the token against the GitHub API before writing `.npmrc`, deduplicates generated keywords, and updates the package metadata and publishing configuration to match your new library.
 
 ## Files
 
