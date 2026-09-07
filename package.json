@@ -1,0 +1,38 @@
+{
+  "name": "@your-org/my-library",
+  "version": "0.1.0",
+  "description": "A minimal TypeScript library published to GitHub Packages.",
+  "private": false,
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run typecheck",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "typescript",
+    "library",
+    "github-packages"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}
