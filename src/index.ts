@@ -1,62 +1,17 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API surface for @strongmove/crawler-core
-// ─────────────────────────────────────────────────────────────────────────────
+export interface LibraryConfig {
+  name: string;
+  version?: string;
+}
 
-// Types
-export type {
-  ParsedItem,
-  PageParseResult,
-  PageType,
-  PluginMatcher,
-  PluginOptions,
-  SitePlugin,
-  PersistenceAdapter,
-  QueueAdapter,
-  QueueItem,
-  SaveItemResult,
-  CrawlerOptions,
-  CrawlSummary,
-  FetchOptions,
-  FetchContext,
-  FetchMode,
-  FetchModeDecisionContext,
-  FetchModeDecisionCallback,
-  BrowserActionKind,
-  BrowserActionStep,
-  BrowserActionPlan,
-  BrowserFlowResult,
-  Logger,
-  CrawlEvent,
-  LogLevel,
-} from "./types";
+export function greet(name = "friend"): string {
+  return `Hello, ${name}!`;
+}
 
-// Utilities
-export {
-  resolveHref,
-  normalizeTitle,
-  computeContentHash,
-  safeUrl,
-} from "./utils";
-export type { ResolveHrefOptions, NormalizeTitleOptions } from "./utils";
+export function createLibrarySummary(config: LibraryConfig): string {
+  return `${config.name} v${config.version ?? "0.1.0"}`;
+}
 
-// Fetcher
-export { fetchPage } from "./fetcher";
-export type { FetchResult } from "./fetcher";
-
-// Plugin registry
-export {
-  registerPlugin,
-  clearPlugins,
-  getPlugins,
-  findPlugin,
-} from "./pluginRegistry";
-
-// Crawler engine
-export { runCrawl, runWorkerLoop } from "./crawler";
-
-// Event emitter
-export { EventEmitter } from "./EventEmitter";
-
-// In-memory / dev adapters
-export { InMemoryQueue } from "./adapters/InMemoryQueue";
-export { NoopPersistenceAdapter } from "./adapters/NoopPersistenceAdapter";
+export default {
+  greet,
+  createLibrarySummary,
+};

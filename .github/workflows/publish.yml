@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://npm.pkg.github.com"
-          scope: "@strongmove"
+          scope: "@your-org"
           cache: "npm"
 
       - run: npm ci
